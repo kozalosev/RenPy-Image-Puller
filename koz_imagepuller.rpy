@@ -28,6 +28,9 @@ init python:
     class koz_ImagePuller:
         """This is the main class that encapsulates all logic related to resource fetching and writing to the disk."""
 
+        # See the CachedIterator class.
+        _iterator = None
+
         def __init__(self, dir_name="Pulled images"):
             """Constructor.
             :param dir_name: The name of a directory you want to save images into.
@@ -142,28 +145,16 @@ init python:
             :rtype: bool
             """
 
-            from renpy.display.image import images
+            params = (exclude, only, has_components, exclude_components)
+            if not self._iterator or not self._iterator.is_valid(*params):
+                self._iterator = self.CachedIterator(*params)
 
-            for k, v in images.iteritems():
-                if k[0] in exclude or only and k[0] not in only:
-                    continue
-
-                skip = False
-                for component in has_components:
-                    if component not in k:
-                        skip = True
-                        break
-                for component in exclude_components:
-                    if component in k:
-                        skip = True
-                        break
-                if skip:
-                    continue
-
+            for k, v in self._iterator.get():
                 name = "_".join(k)
                 try:
                     self.save_png(name, v, k[0], container_ids)
-                except Exception:
+                except Exception as err:
+                    self.__log(err)
                     return False
 
             return True
@@ -189,6 +180,67 @@ init python:
 
             timer = Timer(delay, run)
             timer.start()
+
+        @staticmethod
+        def __log(obj):
+            """Writes a message to the log file.
+            :param obj: Any object that can be cast to a string. If it's an exception, a full traceback will be written.
+            """
+
+            with open("koz_imagepuller-errors.log", 'a') as f:
+                if isinstance(obj, Exception):
+                    import traceback
+                    traceback.print_exc(file=f)
+                else:
+                    f.write(str(obj))
+
+
+        class CachedIterator:
+            """Used to continue the pulling, when it fails, from an image following the failed one."""
+
+            def __init__(self, exclude=(), only=(), has_components=(), exclude_components=()):
+                """Constructor. See the docstring of the `pull` method to know about the arguments."""
+
+                self._exclude = exclude
+                self._only = only
+                self._has_components = has_components
+                self._exclude_components = exclude_components
+
+                def img_filter(k):
+                    """
+                    :param k: The list of name components of an image.
+                    :type k: tuple(str)
+                    """
+
+                    if k[0] in self._exclude or self._only and k[0] not in self._only:
+                        return False
+                    for component in self._has_components:
+                        if component not in k:
+                            return False
+                    for component in self._exclude_components:
+                        if component in k:
+                            return False
+
+                    return True
+
+                from renpy.display.image import images
+
+                filtered_images = {k:v for k,v in images.iteritems() if img_filter(k)}
+                self._iterator = filtered_images.iteritems()
+
+            def is_valid(self, exclude=(), only=(), has_components=(), exclude_components=()):
+                """
+                :returns: True if the iterator is consistent with the arguments, and False otherwise.
+                :rtype: bool
+                """
+                return not (self._exclude != exclude or self._only != only or self._has_components != has_components or self._exclude_components != exclude_components)
+
+            def get(self):
+                """
+                :returns: The actual iterator.
+                :rtype: dictionary-itemiterator
+                """
+                return self._iterator
 
 
     # For Everlasting Summer I provide a convenient way to start the pulling via the standard mod selector.
