@@ -56,7 +56,7 @@ init python:
                 return
             os.makedirs(path)
 
-        def save_png(self, filename, img, subfolder=None):
+        def save_png(self, filename, img, subfolder=None, container_ids=()):
             """
             This is the main operating method that fetches one image and write it to the disk.
             If the image is actually a container (in case of ConditionSwitch, for example), it calls self recursevely to save all internal images.
@@ -91,9 +91,17 @@ init python:
             if isinstance(img, Position):
                 dynamic_displayable = img.child
                 # I want to thank LolBot (https://github.com/lolbot-iichan) for image filters in Everlasting Summer that I used as an example.
-                for i, (condition, image) in enumerate(dynamic_displayable.args[0]):
-                    new_filename = "%s_%i" % (filename, i+1)
-                    self.save_png(new_filename, image, subfolder)
+                if container_ids:
+                    for id in container_ids:
+                        assert id >= 0, "Negative value in container_ids! (%i)" % id
+                        if id < len(dynamic_displayable.args[0]):
+                            new_filename = "%s_%i" % (filename, id)
+                            image = dynamic_displayable.args[0][id][1]
+                            self.save_png(new_filename, image, subfolder)
+                else:
+                    for i, (condition, image) in enumerate(dynamic_displayable.args[0]):
+                        new_filename = "%s_%i" % (filename, i+1)
+                        self.save_png(new_filename, image, subfolder)
                 return
             elif not isinstance(img, ImageBase):
                 return
@@ -111,7 +119,7 @@ init python:
             with open(path, "wb") as f:
                 f.write(content)
 
-        def pull(self, exclude=(), only=()):
+        def pull(self, exclude=(), only=(), has_components=(), exclude_components=(), container_ids=()):
             """Runs the process of image pulling.
 
             :param exclude: A list of character tags that should be skipped.
@@ -120,47 +128,64 @@ init python:
             :param only: A list of character tags whose images should be pulled. If this argument is not empty, all other tags, not listed here, will be skipped.
             :type only: list(str) or tuple(str)
 
+            :param has_components: A list of parameters (clothes, emotion) that the image must have.
+            :type has_components: list(str) or tuple(str)
+
+            :param exclude_components: A list of parameters (clothes, emotion) that the image must NOT have.
+            :type exclude_components: list(str) or tuple(str)
+
+            :param container_ids: If the image is actually a container, the puller extracts all images from them by default. You can set indexes manually.
+                                  If an index is greater than the count of images, it will be ignored. Negative values will be the cause of the assertion error.
+            :type container_ids: list(int) or tuple(int)
+
             :returns: True if *all* images have been unpacked successfully and False otherwise (usually it happens when the game is out of memory).
             :rtype: bool
             """
 
             from renpy.display.image import images
 
-            only_enabled = len(only) > 0
             for k, v in images.iteritems():
-                if k[0] in exclude or only_enabled and k[0] not in only:
+                if k[0] in exclude or only and k[0] not in only:
                     continue
-                name = "_".join(k)
 
+                skip = False
+                for component in has_components:
+                    if component not in k:
+                        skip = True
+                        break
+                for component in exclude_components:
+                    if component in k:
+                        skip = True
+                        break
+                if skip:
+                    continue
+
+                name = "_".join(k)
                 try:
-                    self.save_png(name, v, k[0])
+                    self.save_png(name, v, k[0], container_ids)
                 except Exception:
                     return False
 
             return True
 
-        def pull_async(self, exclude=(), only=(), delay=0):
+        def pull_async(self, delay=0, **kwargs):
             """
             Runs the Pull() method (runs the process of image pulling) in another thread.
             This prevents the game from freezing, but it still will be less responsive until the operation is done.
             Additionally, this method gives you a way to delay the pulling for a while to let the game initialize its resources completely.
             This method tries to solve the problem with crashes described in the description of Pull() by recreating new threads unless all images will be unpacked.
 
-            :param exclude: A list of character tags that should be skipped.
-            :type exclude: list(str) or tuple(str)
-
-            :param only: A list of character tags whose images should be pulled. If this argument is not empty, all other tags, not listed here, will be skipped.
-            :type only: list(str) or tuple(str)
-
             :param delay: The pulling will be started after a specified number of seconds.
             :type delay: int or float
+
+            Also, it takes all keyword arguments that a non-asynchronous version does.
             """
 
             from threading import Timer
 
             def run():
-                if not self.pull(exclude, only):
-                    self.pull_async(exclude, only)
+                if not self.pull(**kwargs):
+                    self.pull_async(**kwargs)
 
             timer = Timer(delay, run)
             timer.start()
@@ -180,6 +205,9 @@ init python:
     #   $ koz_ImagePuller().pull_async(delay=10)
     # If you want to pull images for only certain characters, pass a list of tags as the `only` argument.
     # Another way to constrain the pulling is to use the `exclude` argument, which also gets a list of tags which must be skipped.
+    # There are other filters such as `has_components`, `exclude_components`, and `container_ids` as well.
+    # The first two ones are responsible for filtering over standard Ren'Py image modifiers.
+    # The last parameter lets you constrain pulling from containers up to determined list of indexes.
 
 
 label koz_imagepuller_es:
@@ -193,18 +221,21 @@ label koz_imagepuller_es:
     us "Привет, шалунишка! Хочешь извлечь наши спрайты?"    
     dv "И чьи же спрайты ты хочешь стянуть?"
     
-    $ char_set = []
-    call koz_imagepuller_es_append(char_set)
+    $ char_set, daytime_set = [], []
+    $ include_distances_set, exclude_distances_set = [], []
+    call koz_imagepuller_es_append_char(char_set)
+    call koz_imagepuller_es_append_daytime(daytime_set)
+    call koz_imagepuller_es_select_distance(include_distances_set, exclude_distances_set)
 
     sl "ОК! Сейчас начнётся процесс извлечения спрайтов."
     us "Кликни, чтобы продолжить... Бла-бла-бла, все дела..."
 
-    $ koz_ImagePuller().pull_async(only=char_set)
+    $ koz_ImagePuller().pull_async(only=char_set, has_components=include_distances_set, exclude_components=exclude_distances_set, container_ids=daytime_set)
 
     sl "Процесс пошёл... Как игра перестанет подтормаживать, а в папке \"Pulled images\" в директории с игрой перестанут появляться новые файлы и папки, можешь выйти отсюда через меню."
     jump koz_imagepuller_es_wait
 
-label koz_imagepuller_es_append(char_set):
+label koz_imagepuller_es_append_char(char_set):
     python:
         def koz_mark_char(code):
             if code not in char_set:
@@ -236,7 +267,45 @@ label koz_imagepuller_es_append(char_set):
         "Закончить выбор":
             return
 
-    call koz_imagepuller_es_append(char_set)
+    call koz_imagepuller_es_append_char(char_set)
+    return
+
+label koz_imagepuller_es_append_daytime(daytime_set):
+    python:
+        def koz_add_daytime(id):
+            if id not in daytime_set:
+                daytime_set.append(id)
+
+    menu:
+        "Время суток"
+
+        "Закат":
+            $ koz_add_daytime(0)
+        "Ночь":
+            $ koz_add_daytime(1)
+        "День":
+            $ koz_add_daytime(2)
+        "Закончить выбор":
+            return
+
+    call koz_imagepuller_es_append_daytime(daytime_set)
+    return
+
+label koz_imagepuller_es_select_distance(include_distances_set, exclude_distances_set):
+    $ exclude_distances_set.append("body")
+    menu:
+        "Все":
+            pass
+        "Обычные":
+            $ exclude_distances_set.append("close")
+            $ exclude_distances_set.append("far")
+        "Крупным планом":
+            $ include_distances_set.append("close")
+        "В отдалении":
+            $ include_distances_set.append("far")
+        "Обнажённые":
+            $ exclude_distances_set.remove("body")
+            $ include_distances_set.append("body")
     return
 
 label koz_imagepuller_es_wait:
