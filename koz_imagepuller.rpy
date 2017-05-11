@@ -51,17 +51,12 @@ init python:
             """
 
             import os
-            import errno
 
-            try:
-                os.makedirs(path)
-            except OSError as err:
-                if err.errno == errno.EEXIST and os.path.isdir(path):
-                    pass
-                else:
-                    raise
+            if os.path.isdir(path):
+                return
+            os.makedirs(path)
 
-        def save_png(self, filename, img):
+        def save_png(self, filename, img, subfolder=None):
             """
             This is the main operating method that fetches one image and write it to the disk.
             If the image is actually a container (in case of ConditionSwitch, for example), it calls self recursevely to save all internal images.
@@ -71,6 +66,9 @@ init python:
 
             :param img: A Ren'Py image. All descendants of ImageBase and Position may be passed here. Other types will be ignored.
             :type img: ImageBase or Position
+
+            :param subfolder: The name of a folder in which the image will be saved.
+            :type subfolder: str
             """
 
             from renpy.display.module import save_png
@@ -79,8 +77,14 @@ init python:
             import cStringIO
             import os
 
+            if subfolder:
+                subfolder_path = os.path.join(self.output_dir, subfolder)
+                self.ensure_path_exists(subfolder_path)
+                path = os.path.join(subfolder_path, filename + ".png")
+            else:
+                path = os.path.join(self.output_dir, filename + ".png")
+
             # If the file already exists, we won't overwrite it.
-            path = os.path.join(self.output_dir, filename + ".png")
             if os.path.isfile(path):
                 return
             
@@ -89,7 +93,7 @@ init python:
                 # I want to thank LolBot (https://github.com/lolbot-iichan) for image filters in Everlasting Summer that I used as an example.
                 for i, (condition, image) in enumerate(dynamic_displayable.args[0]):
                     new_filename = "%s_%i" % (filename, i+1)
-                    self.save_png(new_filename, image)
+                    self.save_png(new_filename, image, subfolder)
                 return
             elif not isinstance(img, ImageBase):
                 return
@@ -129,7 +133,7 @@ init python:
                 name = "_".join(k)
 
                 try:
-                    self.save_png(name, v)
+                    self.save_png(name, v, k[0])
                 except Exception:
                     return False
 
@@ -197,7 +201,7 @@ label koz_imagepuller_es:
 
     $ koz_ImagePuller().pull_async(only=char_set)
 
-    sl "Процесс пошёл... Как игра перестанет подтормаживать, а в папке \"Pulled images\" в папке с игрой перестанут появляться новые файлы, можешь выйти отсюда через меню."
+    sl "Процесс пошёл... Как игра перестанет подтормаживать, а в папке \"Pulled images\" в директории с игрой перестанут появляться новые файлы и папки, можешь выйти отсюда через меню."
     jump koz_imagepuller_es_wait
 
 label koz_imagepuller_es_append(char_set):
