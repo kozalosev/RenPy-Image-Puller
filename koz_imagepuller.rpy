@@ -42,6 +42,7 @@ init python:
             path = os.path.join(config.basedir, dir_name)
             self.ensure_path_exists(path)
             self.output_dir = path
+            self.stop_flag = False
 
         @staticmethod
         def ensure_path_exists(path):
@@ -122,7 +123,7 @@ init python:
             with open(path, "wb") as f:
                 f.write(content)
 
-        def pull(self, exclude=(), only=(), has_components=(), exclude_components=(), container_ids=()):
+        def pull(self, exclude=(), only=(), has_components=(), exclude_components=(), container_ids=(), progress_callback=None):
             """Runs the process of image pulling.
 
             :param exclude: A list of character tags that should be skipped.
@@ -141,6 +142,10 @@ init python:
                                   If an index is greater than the count of images, it will be ignored. Negative values will be the cause of the assertion error.
             :type container_ids: list(int) or tuple(int)
 
+            :param progress_callback: This function will be called after each image being extracted. It must take 3 arguments: progress (number in the range [0; 1]),
+                                      the index of the last extracted image, and the total number of images (images in a container are considered as one image).
+            :type progress_callback: callable
+
             :returns: True if *all* images have been unpacked successfully and False otherwise (usually it happens when the game is out of memory).
             :rtype: bool
             """
@@ -149,13 +154,22 @@ init python:
             if not self._iterator or not self._iterator.is_valid(*params):
                 self._iterator = self.CachedIterator(*params)
 
-            for k, v in self._iterator.get():
+            k, v = self._iterator.get()
+            while k is not None:
+                if self.stop_flag:
+                    return False
+
                 name = "_".join(k)
                 try:
                     self.save_png(name, v, k[0], container_ids)
                 except Exception as err:
                     self.__log(err)
                     return False
+
+                if progress_callback:
+                    progress_callback(self._iterator.progress, self._iterator.i, self._iterator.total)
+
+                k, v = self._iterator.get()
 
             return True
 
@@ -175,11 +189,15 @@ init python:
             from threading import Timer
 
             def run():
-                if not self.pull(**kwargs):
+                if not self.pull(**kwargs) and not self.stop_flag:
                     self.pull_async(**kwargs)
 
             timer = Timer(delay, run)
             timer.start()
+
+        def stop(self):
+            """Sets the stop flag to True."""
+            self.stop_flag = True
 
         @staticmethod
         def __log(obj):
@@ -228,6 +246,9 @@ init python:
                 filtered_images = {k:v for k,v in images.iteritems() if img_filter(k)}
                 self._iterator = filtered_images.iteritems()
 
+                self._total = len(filtered_images)
+                self._i = 0
+
             def is_valid(self, exclude=(), only=(), has_components=(), exclude_components=()):
                 """
                 :returns: True if the iterator is consistent with the arguments, and False otherwise.
@@ -237,15 +258,57 @@ init python:
 
             def get(self):
                 """
-                :returns: The actual iterator.
-                :rtype: dictionary-itemiterator
+                :returns: A tuple of the tuple of name components, and the image.
+                :rtype: tuple
                 """
-                return self._iterator
+                try:
+                    item = self._iterator.next()
+                except StopIteration:
+                    return None, None
+
+                self._i += 1
+                return item
+
+            @property
+            def i(self):
+                """Property.
+                :returns: The index of current position of the iterator.
+                :rtype: int
+                """
+                return self._i
+
+            @property
+            def total(self):
+                """Property.
+                :returns: A total number of images.
+                :rtype: int
+                """
+                return self._total
+
+            @property
+            def progress(self):
+                """Property.
+                :returns: A float-point number between 0 and 1 representing the fraction of work performed.
+                :rtype: float
+                """
+                return float(self._i) / self._total
 
 
     # For Everlasting Summer I provide a convenient way to start the pulling via the standard mod selector.
     if config.name == "Everlasting Summer" and "mods" in vars() and type(mods) is dict:
         mods["koz_imagepuller_es"] = "Image Puller"
+
+        GLOBAL_KOZ_IMAGEPULLER_PROGRESS = 0
+        GLOBAL_KOZ_IMAGEPULLER_PROGRESSBAR_VALUE = 0
+        GLOBAL_KOZ_IMAGEPULLER_PROGRESSBAR_MAX = 0
+
+        def koz_imagepuller_progress_update(progress, i, total):
+            global GLOBAL_KOZ_IMAGEPULLER_PROGRESS, GLOBAL_KOZ_IMAGEPULLER_PROGRESSBAR_VALUE, GLOBAL_KOZ_IMAGEPULLER_PROGRESSBAR_MAX
+            GLOBAL_KOZ_IMAGEPULLER_PROGRESS = progress
+            GLOBAL_KOZ_IMAGEPULLER_PROGRESSBAR_VALUE = i
+            GLOBAL_KOZ_IMAGEPULLER_PROGRESSBAR_MAX = total
+
+            renpy.restart_interaction()
 
     # For other games I see two ways:
     # - You may call the `pull()` or `pull_async()` method somewhere in the code of the game manually. This is a more reliable way.
@@ -262,6 +325,25 @@ init python:
     # The last parameter lets you constrain pulling from containers up to determined list of indexes.
 
 
+# A part of my implementation of LolBot's idea about a progress bar. Uses some hints given by him.
+screen koz_imagepuller_es_progress_bar:
+    window background "#000000BF":
+        vbox align(0.5, 0.5):
+            if GLOBAL_KOZ_IMAGEPULLER_PROGRESS < 1:
+                label "Пожалуйста, подождите..." xalign 0.5
+            else:
+                label "Готово!" xalign 0.5
+            hbox xminimum 0.5 xmaximum 0.5:
+                bar value GLOBAL_KOZ_IMAGEPULLER_PROGRESS range 1
+            label "%d/%d" % (GLOBAL_KOZ_IMAGEPULLER_PROGRESSBAR_VALUE, GLOBAL_KOZ_IMAGEPULLER_PROGRESSBAR_MAX) xalign 0.5
+            null height 20
+            if GLOBAL_KOZ_IMAGEPULLER_PROGRESS >= 1:
+                textbutton "Выход" action Jump("koz_imagepuller_es_done") xalign 0.5
+            else:
+                textbutton "Прервать" action Jump("koz_imagepuller_es_stop") xalign 0.5
+
+
+# Entry point
 label koz_imagepuller_es:
     $ day_time()
     $ persistent.sprite_time = "day"
@@ -279,12 +361,20 @@ label koz_imagepuller_es:
     call koz_imagepuller_es_append_daytime(daytime_set)
     call koz_imagepuller_es_select_distance(include_distances_set, exclude_distances_set)
 
-    sl "ОК! Сейчас начнётся процесс извлечения спрайтов."
+    sl "Спрайты будут рассортированы по папкам внутри директории \"Pulled images\", находящейся в каталоге с игрой."
     us "Кликни, чтобы продолжить... Бла-бла-бла, все дела..."
 
-    $ koz_ImagePuller().pull_async(only=char_set, has_components=include_distances_set, exclude_components=exclude_distances_set, container_ids=daytime_set)
+    # Prevents additional runs of the pulling with possible wrong options.
+    $ renpy.block_rollback()
 
-    sl "Процесс пошёл... Как игра перестанет подтормаживать, а в папке \"Pulled images\" в директории с игрой перестанут появляться новые файлы и папки, можешь выйти отсюда через меню."
+    $ GLOBALS_KOZ_IMAGEPULLER_INSTANCE = koz_ImagePuller()
+    $ GLOBALS_KOZ_IMAGEPULLER_INSTANCE.pull_async(only=char_set,
+                                                  has_components=include_distances_set,
+                                                  exclude_components=exclude_distances_set,
+                                                  container_ids=daytime_set,
+                                                  progress_callback=koz_imagepuller_progress_update)
+
+    show screen koz_imagepuller_es_progress_bar
     jump koz_imagepuller_es_wait
 
 label koz_imagepuller_es_append_char(char_set):
@@ -360,7 +450,18 @@ label koz_imagepuller_es_select_distance(include_distances_set, exclude_distance
             $ include_distances_set.append("body")
     return
 
+# A loop, that will be executing unless either the work will be done, or the user asks to terminate the pulling.
+# Blocks interaction for the user.
 label koz_imagepuller_es_wait:
-    dv "Ну и зачем ты тыкаешь? Просто жди, пока все файлы извлекутся и игра перестанет тормозить. Затем выходи через меню."
-    us "Ну почему ты просто не можешь делать то, что тебе говорят?"
+    $ ui.interact()
     jump koz_imagepuller_es_wait
+
+# Called if the user asked to terminate the pulling.
+label koz_imagepuller_es_stop:
+    $ GLOBALS_KOZ_IMAGEPULLER_INSTANCE.stop()
+    jump koz_imagepuller_es_done
+
+# Exit point
+label koz_imagepuller_es_done:
+    hide screen koz_imagepuller_es_progress_bar
+    return
