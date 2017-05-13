@@ -61,7 +61,7 @@ init python:
                 return
             os.makedirs(path)
 
-        def save_png(self, filename, img, subfolder=None, container_ids=()):
+        def save_png(self, filename, img, subfolder=None, container_ids=(), trim=True):
             """
             This is the main operating method that fetches one image and write it to the disk.
             If the image is actually a container (in case of ConditionSwitch, for example), it calls self recursevely to save all internal images.
@@ -74,6 +74,14 @@ init python:
 
             :param subfolder: The name of a folder in which the image will be saved.
             :type subfolder: str
+
+            :param container_ids: Should the puller extracts all images from containers or only some of them? By default, it extracts everything,
+                                  but you can change this behavior and set indexes manually. If an index is greater than the count of images,
+                                  it will be ignored. Negative values will be the cause of the assertion error.
+            :type container_ids: list(int) or tuple(int)
+
+            :param trim: Should the puller trim transparent areas of images? By default, it's True.
+            :type trim: bool
             """
 
             from renpy.display.module import save_png
@@ -116,6 +124,11 @@ init python:
             # Because of that, I had to write my own implementation relying on examples from Ren'Py source code and its `take_screenshot()` method of the Interface class.
 
             surf = img.load()
+            # Trims a transparent background.
+            if trim:
+                rect = surf.get_bounding_rect()
+                surf = surf.subsurface(rect)
+
             sio = cStringIO.StringIO()
             save_png(surf, sio)
             content = sio.getvalue()
@@ -124,7 +137,7 @@ init python:
             with open(path, "wb") as f:
                 f.write(content)
 
-        def pull(self, exclude=(), only=(), has_components=(), exclude_components=(), container_ids=(), progress_callback=None):
+        def pull(self, exclude=(), only=(), has_components=(), exclude_components=(), container_ids=(), trim=True, progress_callback=None):
             """Runs the process of image pulling.
 
             :param exclude: A list of character tags that should be skipped.
@@ -142,6 +155,9 @@ init python:
             :param container_ids: If the image is actually a container, the puller extracts all images from them by default. You can set indexes manually.
                                   If an index is greater than the count of images, it will be ignored. Negative values will be the cause of the assertion error.
             :type container_ids: list(int) or tuple(int)
+
+            :param trim: Should the puller trim transparent areas of images? By default, it's True.
+            :type trim: bool
 
             :param progress_callback: This function will be called after each image being extracted. It must take 3 arguments: progress (number in the range [0; 1]),
                                       the index of the last extracted image, and the total number of images (images in a container are considered as one image).
@@ -162,7 +178,7 @@ init python:
 
                 name = "_".join(k)
                 try:
-                    self.save_png(name, v, k[0], container_ids)
+                    self.save_png(name, v, k[0], container_ids, trim)
                 except Exception as err:
                     koz_imagepuller_log(err)
                     return False
