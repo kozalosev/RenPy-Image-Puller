@@ -42,6 +42,7 @@ init python:
             path = os.path.join(config.basedir, dir_name)
             self.ensure_path_exists(path)
             self.output_dir = path
+
             self.stop_flag = False
 
         @staticmethod
@@ -163,7 +164,7 @@ init python:
                 try:
                     self.save_png(name, v, k[0], container_ids)
                 except Exception as err:
-                    self.__log(err)
+                    koz_imagepuller_log(err)
                     return False
 
                 if progress_callback:
@@ -189,28 +190,23 @@ init python:
             from threading import Timer
 
             def run():
-                if not self.pull(**kwargs) and not self.stop_flag:
+                try:
+                    pulling_result = self.pull(**kwargs)
+                except Exception as err:
+                    koz_imagepuller_log(err)
+                    return
+
+                if not pulling_result and not self.stop_flag:
+                    koz_imagepuller_log("The working thread is down! Recreating...")
                     self.pull_async(**kwargs)
 
             timer = Timer(delay, run)
+            timer.daemon = True
             timer.start()
 
         def stop(self):
             """Sets the stop flag to True."""
             self.stop_flag = True
-
-        @staticmethod
-        def __log(obj):
-            """Writes a message to the log file.
-            :param obj: Any object that can be cast to a string. If it's an exception, a full traceback will be written.
-            """
-
-            with open("koz_imagepuller-errors.log", 'a') as f:
-                if isinstance(obj, Exception):
-                    import traceback
-                    traceback.print_exc(file=f)
-                else:
-                    f.write(str(obj))
 
 
         class CachedIterator:
@@ -223,6 +219,21 @@ init python:
                 self._only = only
                 self._has_components = has_components
                 self._exclude_components = exclude_components
+
+                self._i = 0
+                self.reload_iterator()
+
+            def is_valid(self, exclude=(), only=(), has_components=(), exclude_components=()):
+                """
+                :returns: True if the iterator is consistent with the arguments, and False otherwise.
+                :rtype: bool
+                """
+                return not (self._exclude != exclude or self._only != only or self._has_components != has_components or self._exclude_components != exclude_components)
+
+            def reload_iterator(self):
+                """Reloads the iterator and moves its cursor to the previous position.
+                I don't know why the iterator reaches its end faster than the moment when all images will be fetched.
+                """
 
                 def img_filter(k):
                     """
@@ -242,19 +253,12 @@ init python:
                     return True
 
                 from renpy.display.image import images
+                import itertools
 
                 filtered_images = {k:v for k,v in images.iteritems() if img_filter(k)}
                 self._iterator = filtered_images.iteritems()
-
+                self._iterator = itertools.islice(self._iterator, self._i, None)
                 self._total = len(filtered_images)
-                self._i = 0
-
-            def is_valid(self, exclude=(), only=(), has_components=(), exclude_components=()):
-                """
-                :returns: True if the iterator is consistent with the arguments, and False otherwise.
-                :rtype: bool
-                """
-                return not (self._exclude != exclude or self._only != only or self._has_components != has_components or self._exclude_components != exclude_components)
 
             def get(self):
                 """
@@ -264,7 +268,12 @@ init python:
                 try:
                     item = self._iterator.next()
                 except StopIteration:
-                    return None, None
+                    if self._i < self._total:
+                        koz_imagepuller_log("The iterator has reached its end, but we have more items. Reloading it...")
+                        self.reload_iterator()
+                        return self.get()
+                    else:
+                        return None, None
 
                 self._i += 1
                 return item
@@ -292,6 +301,31 @@ init python:
                 :rtype: float
                 """
                 return float(self._i) / self._total
+
+
+    def koz_imagepuller_log(obj):
+        """Writes a message to the log file.
+        :param obj: Any object that can be cast to a string. If it's an exception, a full traceback will be written.
+        """
+
+        with open("koz_imagepuller-errors.log", 'a') as f:
+            from datetime import datetime
+            import inspect
+            
+            datestr = datetime.now().strftime("%Y-%m-%d %H:%M")
+            _, _, _, funcname, _, _ = inspect.stack()[1]
+            infostr = "%s (%s)" % (datestr, funcname)
+            length = len(infostr)
+
+            f.write("\n%s\n" % ('-' * length))
+            f.write(infostr)
+            f.write("\n%s\n" % ('-' * length))
+
+            if isinstance(obj, Exception):
+                import traceback
+                traceback.print_exc(file=f)
+            else:
+                f.write(str(obj) + '\n')
 
 
     # For Everlasting Summer I provide a convenient way to start the pulling via the standard mod selector.
@@ -373,7 +407,6 @@ label koz_imagepuller_es:
                                                   exclude_components=exclude_distances_set,
                                                   container_ids=daytime_set,
                                                   progress_callback=koz_imagepuller_progress_update)
-
     show screen koz_imagepuller_es_progress_bar
     jump koz_imagepuller_es_wait
 
