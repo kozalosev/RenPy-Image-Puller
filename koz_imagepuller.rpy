@@ -371,6 +371,30 @@ init python:
 
             renpy.restart_interaction()
 
+        def koz_imagepuller_es_reset_menu_choices():
+            """Removes all strings, used in my menus, from choices to let the user use the choice indication as a selection mark."""
+
+            # We need to store this variable among persistent data, because this function may be called from another context.
+            persistent.GLOBAL_KOZ_IMAGEPULLER_ES_CHOICES_STATE = persistent.choices
+            config.has_autosave = False
+            config.autosave_on_choice = False
+            config.autosave_on_quit = False
+
+            for i in ("Алисы", "Слави", "Ульянки", "Юли", "Мику", "Лены", "Жени", "Ольги Дмитриевны", "Виолы", "Электроника", "Шурика",
+                      "Закончить выбор", "Закат", "Ночь", "День", "Все", "Обычные", "Крупным планом", "В отдалении"):
+                while i in persistent.choices:
+                    persistent.choices.remove(i)
+
+        def koz_imagepuller_es_restore_menu_choices():
+            """Restores the previous state of the choices."""
+
+            persistent.choices = persistent.GLOBAL_KOZ_IMAGEPULLER_ES_CHOICES_STATE
+            del persistent.GLOBAL_KOZ_IMAGEPULLER_ES_CHOICES_STATE
+            config.has_autosave = True
+            config.autosave_on_choice = True
+            config.autosave_on_quit = True
+
+
     # For other games I see two ways:
     # - You may call the `pull()` or `pull_async()` method somewhere in the code of the game manually. This is a more reliable way.
     #   $ koz_ImagePuller().pull()
@@ -416,16 +440,22 @@ label koz_imagepuller_es:
     us "Привет, шалунишка! Хочешь извлечь наши спрайты?"    
     dv "И чьи же спрайты ты хочешь стянуть?"
     
+    # Resets previous choices and hacks Ren'Py to be sure that the state won't be changed after quitting the mod.
+    call koz_imagepuller_es_lock_menu_choices
+    $ renpy.block_rollback()
+
     $ char_set, daytime_set = [], []
     $ include_distances_set, exclude_distances_set = [], []
     call koz_imagepuller_es_append_char(char_set)
+    $ persistent.choices.remove("Закончить выбор")
     call koz_imagepuller_es_append_daytime(daytime_set)
     call koz_imagepuller_es_select_distance(include_distances_set, exclude_distances_set)
 
+    call koz_imagepuller_es_release_menu_choices
+    $ renpy.block_rollback()
+
     sl "Спрайты будут рассортированы по папкам внутри директории \"Pulled images\", находящейся в каталоге с игрой."
     us "Кликни, чтобы продолжить... Бла-бла-бла, все дела..."
-
-    # Prevents additional runs of the pulling with possible wrong options.
     $ renpy.block_rollback()
 
     $ GLOBALS_KOZ_IMAGEPULLER_INSTANCE = koz_ImagePuller()
@@ -520,4 +550,46 @@ label koz_imagepuller_es_stop:
 # Exit point
 label koz_imagepuller_es_done:
     hide screen koz_imagepuller_es_progress_bar
+    return
+
+# Resets choices and applies some hacks to restore the state when the user quitting the mod.
+label koz_imagepuller_es_lock_menu_choices:
+    python:
+        if "_invoke_main_menu" in config.label_overrides:
+            persistent.GLOBAL_KOZ_IMAGEPULLER_ES_ORIGIN_MAIN_MENU = config.label_overrides['_invoke_main_menu']
+        else:
+            persistent.GLOBAL_KOZ_IMAGEPULLER_ES_ORIGIN_MAIN_MENU = None
+        config.label_overrides['_invoke_main_menu'] = "koz_imagepuller_es_main_menu_hack"      
+    
+        def koz_imagepuller_es_quit_override():
+            koz_imagepuller_es_restore_menu_choices()
+            persistent.GLOBAL_KOZ_IMAGEPULLER_ES_ORIGIN_QUIT()
+
+        persistent.GLOBAL_KOZ_IMAGEPULLER_ES_ORIGIN_QUIT = renpy.quit
+        renpy.quit = koz_imagepuller_es_quit_override
+
+        koz_imagepuller_es_reset_menu_choices()
+
+    return
+
+# Called, when the user tries to get back to the main menu, and restores the state.
+# It's called in another context!
+label koz_imagepuller_es_main_menu_hack:
+    $ koz_imagepuller_es_restore_menu_choices()
+    call koz_imagepuller_es_release_menu_choices
+    jump _invoke_main_menu
+
+# Restores the choices and disables the hacks.
+label koz_imagepuller_es_release_menu_choices:
+    python:
+        if persistent.GLOBAL_KOZ_IMAGEPULLER_ES_ORIGIN_MAIN_MENU:
+            config.label_overrides['_invoke_main_menu'] = persistent.GLOBAL_KOZ_IMAGEPULLER_ES_ORIGIN_MAIN_MENU
+        else:
+            del config.label_overrides['_invoke_main_menu']
+
+        renpy.quit = persistent.GLOBAL_KOZ_IMAGEPULLER_ES_ORIGIN_QUIT
+
+        del persistent.GLOBAL_KOZ_IMAGEPULLER_ES_ORIGIN_MAIN_MENU
+        del persistent.GLOBAL_KOZ_IMAGEPULLER_ES_ORIGIN_QUIT
+
     return
