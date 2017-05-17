@@ -1,4 +1,4 @@
-Ren'Py Image Puller v1.0.0
+Ren'Py Image Puller v1.1.0
 ==========================
 
 Scans all defined images and unpack them to the disk.  
@@ -16,9 +16,11 @@ How to use it with Everlasting Summer
 4. Run the **Image Puller** mod.
 5. Click until you reaches a menu.
 6. Select characters you want and click _"Закончить выбор"_.
-7. Wait unless the game becomes responsive again.
-8. See `/Pulled images/` directory.
-9. Exit via the context menu.
+# 7. Select sets for the times of day you want and click "Закончить выбор".
+# 8. Select a set of sprites depending on the distance between the characters and the player.
+# 9. Wait...
+# 10. Click on the button named "Выйти".
+# 11. See /Pulled images/ directory.
 
 What about other Ren'Py-based games?
 ------------------------------------
@@ -37,3 +39,6 @@ I see two ways:
 
 If you want to pull images for only certain characters, pass a list of tags as the `only` argument.  
 Another way to constrain the pulling is to use the `exclude` argument, which also gets a list of tags which must be skipped.  
+There are other filters such as `has_components`, `exclude_components`, and `container_ids` as well.  
+The first two ones are responsible for filtering over standard Ren'Py image modifiers.  
+The last parameter lets you constrain pulling from containers up to determined list of indexes.  

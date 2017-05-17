@@ -1,4 +1,4 @@
-﻿# Ren'Py Image Puller v1.0.0
+# Ren'Py Image Puller v1.1.0
 # Scans all defined images and unpack them to the disk.
 # (c) Leonid Kozarin <kozalo@nekochan.ru> [http://kozalo.ru], 2017
 # License: MIT
@@ -12,9 +12,11 @@
 # 4. Run the "Image Puller" mod.
 # 5. Click until you reaches a menu.
 # 6. Select characters you want and click "Закончить выбор".
-# 7. Wait unless the game becomes responsive again.
-# 8. See /Pulled images/ directory.
-# 9. Exit via the context menu.
+# 7. Select sets for the times of day you want and click "Закончить выбор".
+# 8. Select a set of sprites depending on the distance between the characters and the player.
+# 9. Wait...
+# 10. Click on the button named "Выйти".
+# 11. See /Pulled images/ directory.
 
 # ===================================
 # WHAT ABOUT OTHER RENPY-BASED GAMES?
@@ -31,10 +33,13 @@ init python:
         # See the CachedIterator class.
         _iterator = None
 
-        def __init__(self, dir_name="Pulled images"):
+        def __init__(self, dir_name="Pulled images", trim=True):
             """Constructor.
             :param dir_name: The name of a directory you want to save images into.
             :type dir_name: str
+
+            :param trim: Should the puller trim transparent areas of images? By default, it's True.
+            :type trim: bool
             """
 
             import os
@@ -43,13 +48,13 @@ init python:
             self.ensure_path_exists(path)
             self.output_dir = path
 
+            self.trim = trim
             self.stop_flag = False
 
         @staticmethod
         def ensure_path_exists(path):
             """
             This function is a backport for Python 2 and equivalent to `os.makedirs(path, exist_ok=True)` in Python 3.
-            Was taken from: http://stackoverflow.com/a/600612
 
             :param path: A path to some directory.
             :type path: str
@@ -61,7 +66,7 @@ init python:
                 return
             os.makedirs(path)
 
-        def save_png(self, filename, img, subfolder=None, container_ids=(), trim=True):
+        def save_png(self, filename, img, subfolder=None, container_ids=()):
             """
             This is the main operating method that fetches one image and write it to the disk.
             If the image is actually a container (in case of ConditionSwitch, for example), it calls self recursevely to save all internal images.
@@ -79,9 +84,6 @@ init python:
                                   but you can change this behavior and set indexes manually. If an index is greater than the count of images,
                                   it will be ignored. Negative values will be the cause of the assertion error.
             :type container_ids: list(int) or tuple(int)
-
-            :param trim: Should the puller trim transparent areas of images? By default, it's True.
-            :type trim: bool
             """
 
             from renpy.display.module import save_png
@@ -108,15 +110,18 @@ init python:
                     for id in container_ids:
                         assert id >= 0, "Negative value in container_ids! (%i)" % id
                         if id < len(dynamic_displayable.args[0]):
-                            new_filename = "%s_%i" % (filename, id)
+                            new_filename = "%s_%i" % (filename, id + 1)
                             image = dynamic_displayable.args[0][id][1]
                             self.save_png(new_filename, image, subfolder)
+                        else:
+                            koz_imagepuller_log("Wrong image ID! %i is not in %s." % (id, dynamic_displayable))
                 else:
                     for i, (condition, image) in enumerate(dynamic_displayable.args[0]):
-                        new_filename = "%s_%i" % (filename, i+1)
+                        new_filename = "%s_%i" % (filename, i + 1)
                         self.save_png(new_filename, image, subfolder)
                 return
             elif not isinstance(img, ImageBase):
+                koz_imagepuller_log("Unknown type of image! (%s, %s)" % (filename, type(filename)))
                 return
 
             # pygame.image.save(surf, path)
@@ -125,7 +130,7 @@ init python:
 
             surf = img.load()
             # Trims a transparent background.
-            if trim:
+            if self.trim:
                 rect = surf.get_bounding_rect()
                 surf = surf.subsurface(rect)
 
@@ -137,7 +142,7 @@ init python:
             with open(path, "wb") as f:
                 f.write(content)
 
-        def pull(self, exclude=(), only=(), has_components=(), exclude_components=(), container_ids=(), trim=True, progress_callback=None):
+        def pull(self, exclude=(), only=(), has_components=(), exclude_components=(), container_ids=(), progress_callback=None):
             """Runs the process of image pulling.
 
             :param exclude: A list of character tags that should be skipped.
@@ -156,9 +161,6 @@ init python:
                                   If an index is greater than the count of images, it will be ignored. Negative values will be the cause of the assertion error.
             :type container_ids: list(int) or tuple(int)
 
-            :param trim: Should the puller trim transparent areas of images? By default, it's True.
-            :type trim: bool
-
             :param progress_callback: This function will be called after each image being extracted. It must take 3 arguments: progress (number in the range [0; 1]),
                                       the index of the last extracted image, and the total number of images (images in a container are considered as one image).
             :type progress_callback: callable
@@ -169,6 +171,10 @@ init python:
 
             params = (exclude, only, has_components, exclude_components)
             if not self._iterator or not self._iterator.is_valid(*params):
+                log_params = list(params)
+                log_params.append(container_ids)
+                koz_imagepuller_log("Creating a new iterator with the following parameters:", *log_params)
+
                 self._iterator = self.CachedIterator(*params)
 
             k, v = self._iterator.get()
@@ -178,7 +184,7 @@ init python:
 
                 name = "_".join(k)
                 try:
-                    self.save_png(name, v, k[0], container_ids, trim)
+                    self.save_png(name, v, k[0], container_ids)
                 except Exception as err:
                     koz_imagepuller_log(err)
                     return False
@@ -188,6 +194,8 @@ init python:
 
                 k, v = self._iterator.get()
 
+            if progress_callback:
+                progress_callback(self._iterator.progress, self._iterator.i, self._iterator.total)
             return True
 
         def pull_async(self, delay=0, **kwargs):
@@ -271,7 +279,7 @@ init python:
                 from renpy.display.image import images
                 import itertools
 
-                filtered_images = {k:v for k,v in images.iteritems() if img_filter(k)}
+                filtered_images = {k:v for k, v in images.iteritems() if img_filter(k)}
                 self._iterator = filtered_images.iteritems()
                 self._iterator = itertools.islice(self._iterator, self._i, None)
                 self._total = len(filtered_images)
@@ -316,32 +324,33 @@ init python:
                 :returns: A float-point number between 0 and 1 representing the fraction of work performed.
                 :rtype: float
                 """
-                return float(self._i) / self._total
+                return float(self._i) / self._total if self._total > 0 else 1
 
 
-    def koz_imagepuller_log(obj):
+    def koz_imagepuller_log(*args):
         """Writes a message to the log file.
-        :param obj: Any object that can be cast to a string. If it's an exception, a full traceback will be written.
+        :param args: Any objects that can be cast to strings. For exceptions a full traceback will be written.
         """
 
-        with open("koz_imagepuller-errors.log", 'a') as f:
-            from datetime import datetime
-            import inspect
-            
-            datestr = datetime.now().strftime("%Y-%m-%d %H:%M")
-            _, _, _, funcname, _, _ = inspect.stack()[1]
-            infostr = "%s (%s)" % (datestr, funcname)
-            length = len(infostr)
+        from datetime import datetime
+        import inspect
+        
+        datestr = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        _, _, _, funcname, _, _ = inspect.stack()[1]
+        infostr = "%s (%s)" % (datestr, funcname)
+        length = len(infostr)
 
+        with open("koz_imagepuller.log", 'a') as f:
             f.write("\n%s\n" % ('-' * length))
             f.write(infostr)
             f.write("\n%s\n" % ('-' * length))
 
-            if isinstance(obj, Exception):
-                import traceback
-                traceback.print_exc(file=f)
-            else:
-                f.write(str(obj) + '\n')
+            for obj in args:
+                if isinstance(obj, Exception):
+                    import traceback
+                    traceback.print_exc(file=f)
+                else:
+                    f.write(str(obj) + '\n')
 
 
     # For Everlasting Summer I provide a convenient way to start the pulling via the standard mod selector.
@@ -353,6 +362,8 @@ init python:
         GLOBAL_KOZ_IMAGEPULLER_PROGRESSBAR_MAX = 0
 
         def koz_imagepuller_progress_update(progress, i, total):
+            """Manages the global variables which values are reflected on the progress bar."""
+
             global GLOBAL_KOZ_IMAGEPULLER_PROGRESS, GLOBAL_KOZ_IMAGEPULLER_PROGRESSBAR_VALUE, GLOBAL_KOZ_IMAGEPULLER_PROGRESSBAR_MAX
             GLOBAL_KOZ_IMAGEPULLER_PROGRESS = progress
             GLOBAL_KOZ_IMAGEPULLER_PROGRESSBAR_VALUE = i
@@ -483,7 +494,6 @@ label koz_imagepuller_es_append_daytime(daytime_set):
     return
 
 label koz_imagepuller_es_select_distance(include_distances_set, exclude_distances_set):
-    $ exclude_distances_set.append("body")
     menu:
         "Все":
             pass
@@ -494,9 +504,6 @@ label koz_imagepuller_es_select_distance(include_distances_set, exclude_distance
             $ include_distances_set.append("close")
         "В отдалении":
             $ include_distances_set.append("far")
-        "Обнажённые":
-            $ exclude_distances_set.remove("body")
-            $ include_distances_set.append("body")
     return
 
 # A loop, that will be executing unless either the work will be done, or the user asks to terminate the pulling.
