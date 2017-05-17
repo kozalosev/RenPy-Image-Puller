@@ -16,11 +16,11 @@ How to use it with Everlasting Summer
 4. Run the **Image Puller** mod.
 5. Click until you reaches a menu.
 6. Select characters you want and click _"Закончить выбор"_.
-# 7. Select sets for the times of day you want and click "Закончить выбор".
-# 8. Select a set of sprites depending on the distance between the characters and the player.
-# 9. Wait...
-# 10. Click on the button named "Выйти".
-# 11. See /Pulled images/ directory.
+7. Select sets for the times of day you want and click _"Закончить выбор"_.
+8. Select a set of sprites depending on the distance between the characters and the player.
+9. Wait...
+10. Click on the button named _"Выйти"_.
+11. See `/Pulled images/` directory.
 
 What about other Ren'Py-based games?
 ------------------------------------
