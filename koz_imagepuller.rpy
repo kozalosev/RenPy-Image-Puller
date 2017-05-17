@@ -198,7 +198,7 @@ init python:
                 progress_callback(self._iterator.progress, self._iterator.i, self._iterator.total)
             return True
 
-        def pull_async(self, delay=0, **kwargs):
+        def pull_async(self, delay=0, threads=1, **kwargs):
             """
             Runs the Pull() method (runs the process of image pulling) in another thread.
             This prevents the game from freezing, but it still will be less responsive until the operation is done.
@@ -208,10 +208,17 @@ init python:
             :param delay: The pulling will be started after a specified number of seconds.
             :type delay: int or float
 
+            :param threads: By default, the script pulls images using only one working thread. It may be not only inefficient, but it can be the cause of some problems
+                          : on large arrays of images.
+            :type threads: int
+
             Also, it takes all keyword arguments that a non-asynchronous version does.
             """
 
             from threading import Timer
+
+            assert delay >= 0, "Delay must be greater or equal to zero!"
+            assert threads > 0, "Threads must be greater than zero!"
 
             def run():
                 try:
@@ -221,12 +228,13 @@ init python:
                     return
 
                 if not pulling_result and not self.stop_flag:
-                    koz_imagepuller_log("The working thread is down! Recreating...")
-                    self.pull_async(**kwargs)
+                    koz_imagepuller_log("The working thread%s down! Recreating..." % " is" if thread == 1 else "s are")
+                    self.pull_async(threads=threads, **kwargs)
 
-            timer = Timer(delay, run)
-            timer.daemon = True
-            timer.start()
+            for i in xrange(threads):
+                timer = Timer(delay, run)
+                timer.daemon = True
+                timer.start()
 
         def stop(self):
             """Sets the stop flag to True."""
@@ -459,7 +467,8 @@ label koz_imagepuller_es:
     $ renpy.block_rollback()
 
     $ GLOBALS_KOZ_IMAGEPULLER_INSTANCE = koz_ImagePuller()
-    $ GLOBALS_KOZ_IMAGEPULLER_INSTANCE.pull_async(only=char_set,
+    $ GLOBALS_KOZ_IMAGEPULLER_INSTANCE.pull_async(threads=2,
+                                                  only=char_set,
                                                   has_components=include_distances_set,
                                                   exclude_components=exclude_distances_set,
                                                   container_ids=daytime_set,
