@@ -30,9 +30,6 @@ init python:
     class koz_ImagePuller:
         """This is the main class that encapsulates all logic related to resource fetching and writing to the disk."""
 
-        # See the CachedIterator class.
-        _iterator = None
-
         def __init__(self, dir_name="Pulled images", trim=True):
             """Constructor.
             :param dir_name: The name of a directory you want to save images into.
@@ -50,6 +47,8 @@ init python:
 
             self.trim = trim
             self.stop_flag = False
+
+            self._iterator = None
 
         @staticmethod
         def ensure_path_exists(path):
@@ -228,7 +227,7 @@ init python:
                     return
 
                 if not pulling_result and not self.stop_flag:
-                    koz_imagepuller_log("The working thread%s down! Recreating..." % " is" if thread == 1 else "s are")
+                    koz_imagepuller_log("The working thread%s down! Recreating..." % (" is" if threads == 1 else "s are"))
                     self.pull_async(threads=threads, **kwargs)
 
             for i in xrange(threads):
@@ -447,6 +446,7 @@ label koz_imagepuller_es:
 
     us "Привет, шалунишка! Хочешь извлечь наши спрайты?"    
     dv "И чьи же спрайты ты хочешь стянуть?"
+    th "{i}Рекомендую выбирать как можно более узкие фильтры, чтобы не было проблем при извлечении. Иначе, возможно, потребуется выполнить несколько запусков распаковки.{/i}"
     
     # Resets previous choices and hacks Ren'Py to be sure that the state won't be changed after quitting the mod.
     call koz_imagepuller_es_lock_menu_choices

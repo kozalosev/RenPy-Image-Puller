@@ -42,3 +42,8 @@ Another way to constrain the pulling is to use the `exclude` argument, which als
 There are other filters such as `has_components`, `exclude_components`, and `container_ids` as well.  
 The first two ones are responsible for filtering over standard Ren'Py image modifiers.  
 The last parameter lets you constrain pulling from containers up to determined list of indexes.  
+
+Known issues
+------------
+
+- The puller doesn't extract all sprites on a large amount of data ([#1](https://github.com/kozalosev/RenPy-Image-Puller/issues/1))
